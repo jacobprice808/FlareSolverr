@@ -18,13 +18,7 @@ FROM python:3.11-slim-bullseye
 COPY --from=builder /*.deb /
 
 # Install dependencies and create flaresolverr user
-# You can test Chromium running this command inside the container:
-#    xvfb-run -s "-screen 0 1600x1200x24" chromium --no-sandbox
-# The error traces is like this: "*** stack smashing detected ***: terminated"
-# To check the package versions available you can use this command:
-#    apt-cache madison chromium
 WORKDIR /app
-    # Install dummy packages
 RUN dpkg -i /libgl1-mesa-dri.deb \
     && dpkg -i /adwaita-icon-theme.deb \
     # Install dependencies

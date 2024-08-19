@@ -1,13 +1,18 @@
 bottle==0.12.25
 waitress==2.1.2
-selenium==4.15.2
 func-timeout==4.3.5
 prometheus-client==0.17.1
-# required by undetected_chromedriver
+
+# DrissionPage (replacing Selenium)
+drissionpage==1.7.0
+
+# HTTP requests and related dependencies
 requests==2.32.3
 certifi==2024.07.04
 websockets==11.0.3
-# only required for linux and macos
+
+# Only required for Linux and macOS
 xvfbwrapper==0.2.9; platform_system != "Windows"
-# only required for windows
+
+# Only required for Windows
 pefile==2023.2.7; platform_system == "Windows"
