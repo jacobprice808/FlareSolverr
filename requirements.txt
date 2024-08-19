@@ -4,7 +4,7 @@ func-timeout==4.3.5
 prometheus-client==0.17.1
 
 # DrissionPage (replacing Selenium)
-drissionpage==1.7.0
+drissionpage==4.0.5.6
 
 # HTTP requests and related dependencies
 requests==2.32.3
