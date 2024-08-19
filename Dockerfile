@@ -21,23 +21,19 @@ COPY --from=builder /*.deb /
 WORKDIR /app
 RUN dpkg -i /libgl1-mesa-dri.deb \
     && dpkg -i /adwaita-icon-theme.deb \
-    # Install dependencies
     && apt-get update \
-    && apt-get install -y --no-install-recommends chromium chromium-common chromium-driver xvfb dumb-init \
-        procps curl vim xauth \
-    # Remove temporary files and hardware decoding libraries
+    && apt-get install -y --no-install-recommends chromium chromium-common chromium-driver xvfb dumb-init procps curl vim xauth \
+    && ln -s /usr/bin/chromium /usr/bin/chromium-browser \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /usr/lib/x86_64-linux-gnu/libmfxhw* \
     && rm -f /usr/lib/x86_64-linux-gnu/mfx/* \
-    # Create flaresolverr user
     && useradd --home-dir /app --shell /bin/sh flaresolverr \
-    && mv /usr/bin/chromedriver chromedriver \
-    && chown -R flaresolverr:flaresolverr .
+    && mv /usr/bin/chromedriver /app/chromedriver \
+    && chown -R flaresolverr:flaresolverr /app
 
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install -r requirements.txt \
-    # Remove temporary files
     && rm -rf /root/.cache
 
 USER flaresolverr
@@ -54,19 +50,3 @@ EXPOSE 8192
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
 CMD ["/usr/local/bin/python", "-u", "/app/flaresolverr.py"]
-
-# Local build
-# docker build -t ngosang/flaresolverr:3.3.21 .
-# docker run -p 8191:8191 ngosang/flaresolverr:3.3.21
-
-# Multi-arch build
-# docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-# docker buildx create --use
-# docker buildx build -t ngosang/flaresolverr:3.3.21 --platform linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8 .
-#   add --push to publish in DockerHub
-
-# Test multi-arch build
-# docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-# docker buildx create --use
-# docker buildx build -t ngosang/flaresolverr:3.3.21 --platform linux/arm/v7 --load .
-# docker run -p 8191:8191 --platform linux/arm/v7 ngosang/flaresolverr:3.3.21
