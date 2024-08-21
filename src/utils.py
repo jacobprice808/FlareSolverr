@@ -127,23 +127,23 @@ def get_webdriver(proxy: dict = None) -> ChromiumPage:
 
     # Configure Chromium options
     options = ChromiumOptions()
-    options.add_argument('--no-sandbox')
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument('--disable-setuid-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--no-zygote')
-    options.add_argument('--disable-gpu-sandbox')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--ignore-certificate-errors')
-    options.add_argument('--ignore-ssl-errors')
-    options.add_argument('--use-gl=swiftshader')
+    options.set_argument('--no-sandbox')
+    options.set_argument('--window-size=1920,1080')
+    options.set_argument('--disable-setuid-sandbox')
+    options.set_argument('--disable-dev-shm-usage')
+    options.set_argument('--no-zygote')
+    options.set_argument('--disable-gpu-sandbox')
+    options.set_argument('--disable-software-rasterizer')
+    options.set_argument('--ignore-certificate-errors')
+    options.set_argument('--ignore-ssl-errors')
+    options.set_argument('--use-gl=swiftshader')
 
     language = os.environ.get('LANG', None)
     if language is not None:
-        options.add_argument('--accept-lang=%s' % language)
+        options.set_argument('--accept-lang=%s' % language)
 
     if USER_AGENT is not None:
-        options.add_argument('--user-agent=%s' % USER_AGENT)
+        options.set_argument('--user-agent=%s' % USER_AGENT)
 
     proxy_extension_dir = None
     if proxy and all(key in proxy for key in ['url', 'username', 'password']):
@@ -191,44 +191,6 @@ def get_chrome_major_version() -> str:
     return CHROME_MAJOR_VERSION
 
 
-def extract_version_nt_executable(exe_path: str) -> str:
-    import pefile
-    pe = pefile.PE(exe_path, fast_load=True)
-    pe.parse_data_directories(
-        directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"]]
-    )
-    return pe.FileInfo[0][0].StringTable[0].entries[b"FileVersion"].decode('utf-8')
-
-
-def extract_version_nt_registry() -> str:
-    stream = os.popen(
-        'reg query "HKLM\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Google Chrome"')
-    output = stream.read()
-    google_version = ''
-    for letter in output[output.rindex('DisplayVersion    REG_SZ') + 24:]:
-        if letter != '\n':
-            google_version += letter
-        else:
-            break
-    return google_version.strip()
-
-
-def extract_version_nt_folder() -> str:
-    # Check if the Chrome folder exists in the x32 or x64 Program Files folders.
-    for i in range(2):
-        path = 'C:\\Program Files' + (' (x86)' if i else '') + '\\Google\\Chrome\\Application'
-        if os.path.isdir(path):
-            paths = [f.path for f in os.scandir(path) if f.is_dir()]
-            for path in paths:
-                filename = os.path.basename(path)
-                pattern = '\d+\.\d+\.\d+\.\d+'
-                match = re.search(pattern, filename)
-                if match and match.group():
-                    # Found a Chrome version.
-                    return match.group(0)
-    return ''
-
-
 def get_user_agent(driver: ChromiumPage = None) -> str:
     global USER_AGENT
     if USER_AGENT is not None:
@@ -237,7 +199,7 @@ def get_user_agent(driver: ChromiumPage = None) -> str:
     try:
         if driver is None:
             driver = get_webdriver()
-        USER_AGENT = driver.js('return navigator.userAgent;')
+        USER_AGENT = driver.run_cdp('Browser.getVersion')['userAgent']
         # Fix for Chrome 117 | https://github.com/FlareSolverr/FlareSolverr/issues/910
         USER_AGENT = re.sub('HEADLESS', '', USER_AGENT, flags=re.IGNORECASE)
         return USER_AGENT
