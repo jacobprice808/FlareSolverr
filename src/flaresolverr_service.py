@@ -282,8 +282,6 @@ def get_correct_window(driver: ChromiumPage) -> ChromiumPage:
 
 def access_page(driver: ChromiumPage, url: str) -> None:
     driver.get(url)
-    driver.start_session()
-    driver.start_session()  # required to bypass Cloudflare
 
 
 def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> ChallengeResolutionT:
@@ -428,5 +426,3 @@ def _post_request(req: V1RequestBase, driver: ChromiumPage):
         </body>
         </html>"""
     driver.get(f"data:text/html;charset=utf-8,{html_content}")
-    driver.start_session()
-    driver.start_session()  # required to bypass Cloudflare
