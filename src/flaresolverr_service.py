@@ -5,6 +5,8 @@ import time
 from datetime import timedelta
 from html import escape
 from urllib.parse import unquote, quote
+import os
+import tempfile
 
 from func_timeout import FunctionTimedOut, func_timeout
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -224,15 +226,35 @@ def _resolve_challenge(req: V1RequestBase, method: str) -> ChallengeResolutionT:
             session, fresh = SESSIONS_STORAGE.get(session_id, ttl)
 
             if fresh:
-                logging.debug(f"new session created to perform the request (session_id={session_id})")
+                logging.debug(f"New session created to perform the request (session_id={session_id})")
             else:
-                logging.debug(f"existing session is used to perform the request (session_id={session_id}, "
+                logging.debug(f"Existing session is used to perform the request (session_id={session_id}, "
                               f"lifetime={str(session.lifetime())}, ttl={str(ttl)})")
 
             driver = session.driver
         else:
-            driver = utils.get_webdriver(req.proxy)
-            logging.debug('New instance of webdriver has been created to perform the request')
+            # Setting up the Chromium options with proxy
+            username = req.proxy.get('username', '')
+            password = req.proxy.get('password', '')
+            endpoint = req.proxy.get('url').split(':')[1].replace("//", "")
+            port = req.proxy.get('url').split(':')[-1]
+            # Assuming you have a "proxies" function that creates a proxy extension
+            proxy_extension = proxies(username, password, endpoint, port)
+            
+            co = ChromiumOptions().add_extension(proxy_extension)
+            co.set_argument('--no-sandbox')
+            co.set_argument('--window-size=1920,1080')
+            co.set_argument('--disable-setuid-sandbox')
+            co.set_argument('--disable-dev-shm-usage')
+            co.set_argument('--no-zygote')
+            co.set_argument('--disable-gpu-sandbox')
+            co.set_argument('--ignore-certificate-errors')
+            co.set_argument('--ignore-ssl-errors')
+            co.set_argument('--use-gl=swiftshader')
+
+            driver = ChromiumPage(options=co)
+            logging.debug('New instance of ChromiumPage has been created to perform the request')
+
         return func_timeout(timeout, _evil_logic, (req, driver, method))
     except FunctionTimedOut:
         raise Exception(f'Error solving the challenge. Timeout after {timeout} seconds.')
@@ -241,18 +263,19 @@ def _resolve_challenge(req: V1RequestBase, method: str) -> ChallengeResolutionT:
     finally:
         if not req.session and driver is not None:
             driver.quit()
-            logging.debug('A used instance of webdriver has been destroyed')
+            logging.debug('A used instance of ChromiumPage has been destroyed')
 
 
 def click_verify(driver: ChromiumPage):
     try:
         logging.debug("Try to find the Cloudflare verify checkbox...")
-        iframe = driver.get_element('//iframe[starts-with(@id, "cf-chl-widget-")]')
-        driver.switch_to.frame(iframe)
-        checkbox = driver.get_element('//*[@id="content"]/div/div/label/input')
-        if checkbox:
-            checkbox.click()
-            logging.debug("Cloudflare verify checkbox found and clicked!")
+        iframe = driver.s_ele('//iframe[starts-with(@id, "cf-chl-widget-")]')
+        if iframe:
+            driver.switch_to.frame(iframe)
+            checkbox = driver.s_ele('//*[@id="content"]/div/div/label/input')
+            if checkbox:
+                checkbox.click()
+                logging.debug("Cloudflare verify checkbox found and clicked!")
     except Exception:
         logging.debug("Cloudflare verify checkbox not found on the page.")
     finally:
@@ -260,7 +283,7 @@ def click_verify(driver: ChromiumPage):
 
     try:
         logging.debug("Try to find the Cloudflare 'Verify you are human' button...")
-        button = driver.get_element("//input[@type='button' and @value='Verify you are human']")
+        button = driver.s_ele("//input[@type='button' and @value='Verify you are human']")
         if button:
             button.click()
             logging.debug("The Cloudflare 'Verify you are human' button found and clicked!")
@@ -271,9 +294,9 @@ def click_verify(driver: ChromiumPage):
 
 
 def get_correct_window(driver: ChromiumPage) -> ChromiumPage:
-    if len(driver.window_handles) > 1:
-        for window_handle in driver.window_handles:
-            driver.switch_to.window(window_handle)
+    if len(driver.tab_ids) > 1:  # Use tab_ids to check for multiple tabs
+        for tab_id in driver.tab_ids:
+            driver.switch_to_tab(tab_id)
             current_url = driver.current_url
             if not current_url.startswith("devtools://devtools"):
                 return driver
@@ -289,7 +312,7 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
     res.status = STATUS_OK
     res.message = ""
 
-    # navigate to the page
+    # Navigate to the page
     logging.debug(f'Navigating to... {req.url}')
     if method == 'POST':
         _post_request(req, driver)
@@ -297,38 +320,39 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
         access_page(driver, req.url)
     driver = get_correct_window(driver)
 
-    # set cookies if required
+    # Set cookies if required
     if req.cookies is not None and len(req.cookies) > 0:
         logging.debug(f'Setting cookies...')
         for cookie in req.cookies:
             driver.delete_cookie(cookie['name'])
             driver.add_cookie(cookie)
-        # reload the page
+        # Reload the page
         if method == 'POST':
             _post_request(req, driver)
         else:
             access_page(driver, req.url)
         driver = get_correct_window(driver)
 
-    # wait for the page
+    # Wait for the page to load
     if utils.get_config_log_html():
-        logging.debug(f"Response HTML:\n{driver.page_source}")
-    html_element = driver.get_element("html")
+        logging.debug(f"Response HTML:\n{driver.html}")
+    html_element = driver.s_ele("html")
     page_title = driver.title
 
-    # find access denied titles
+    # Find access denied titles
     for title in ACCESS_DENIED_TITLES:
         if title == page_title:
             raise Exception('Cloudflare has blocked this request. '
                             'Probably your IP is banned for this site, check in your web browser.')
-    # find access denied selectors
+    
+    # Find access denied selectors
     for selector in ACCESS_DENIED_SELECTORS:
-        found_elements = driver.get_elements(selector, by="css selector")
+        found_elements = driver.s_eles(selector)
         if len(found_elements) > 0:
             raise Exception('Cloudflare has blocked this request. '
                             'Probably your IP is banned for this site, check in your web browser.')
 
-    # find challenge by title
+    # Find challenge by title or selectors
     challenge_found = False
     for title in CHALLENGE_TITLES:
         if title.lower() == page_title.lower():
@@ -336,9 +360,8 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
             logging.info("Challenge detected. Title found: " + page_title)
             break
     if not challenge_found:
-        # find challenge by selectors
         for selector in CHALLENGE_SELECTORS:
-            found_elements = driver.get_elements(selector, by="css selector")
+            found_elements = driver.s_eles(selector)
             if len(found_elements) > 0:
                 challenge_found = True
                 logging.info("Challenge detected. Selector found: " + selector)
@@ -348,32 +371,31 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
     if challenge_found:
         while True:
             try:
-                attempt = attempt + 1
-                # wait until the title changes
+                attempt += 1
+                # Wait until the title changes
                 for title in CHALLENGE_TITLES:
                     logging.debug("Waiting for title (attempt " + str(attempt) + "): " + title)
                     driver.wait_for_title_not_to_be(title, SHORT_TIMEOUT)
 
-                # then wait until all the selectors disappear
+                # Wait until all the challenge selectors disappear
                 for selector in CHALLENGE_SELECTORS:
                     logging.debug("Waiting for selector (attempt " + str(attempt) + "): " + selector)
-                    driver.wait_for_element_to_disappear(selector, SHORT_TIMEOUT, by="css selector")
+                    driver.wait_for_element_to_disappear(selector)
 
-                # all elements not found
+                # All elements not found, proceed
                 break
 
             except Exception as e:
                 logging.debug("Timeout waiting for selector: " + str(e))
-
                 click_verify(driver)
 
-                # update the html (Cloudflare reloads the page every 5 s)
-                html_element = driver.get_element("html")
+                # Update the HTML (Cloudflare reloads the page every 5 seconds)
+                html_element = driver.s_ele("html")
 
-        # waits until Cloudflare redirection ends
+        # Wait until Cloudflare redirection ends
         logging.debug("Waiting for redirect")
         try:
-            driver.wait_for_element_to_disappear(html_element, SHORT_TIMEOUT, by="element")
+            driver.wait_for_element_to_disappear(html_element)
         except Exception:
             logging.debug("Timeout waiting for redirect")
 
@@ -385,13 +407,13 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
 
     challenge_res = ChallengeResolutionResultT({})
     challenge_res.url = driver.current_url
-    challenge_res.status = 200  # Note: DrissionPage may not directly provide status codes
+    challenge_res.status = 200  # DrissionPage does not directly provide status codes
     challenge_res.cookies = driver.get_cookies()
     challenge_res.userAgent = utils.get_user_agent(driver)
 
     if not req.returnOnlyCookies:
-        challenge_res.headers = {}  # Note: DrissionPage may not directly provide headers
-        challenge_res.response = driver.page_source
+        challenge_res.headers = {}  # DrissionPage does not directly provide headers
+        challenge_res.response = driver.html
 
     res.result = challenge_res
     return res
@@ -403,14 +425,12 @@ def _post_request(req: V1RequestBase, driver: ChromiumPage):
     pairs = query_string.split('&')
     for pair in pairs:
         parts = pair.split('=')
-        # noinspection PyBroadException
         try:
             name = unquote(parts[0])
         except Exception:
             name = parts[0]
         if name == 'submit':
             continue
-        # noinspection PyBroadException
         try:
             value = unquote(parts[1])
         except Exception:
@@ -426,3 +446,72 @@ def _post_request(req: V1RequestBase, driver: ChromiumPage):
         </body>
         </html>"""
     driver.get(f"data:text/html;charset=utf-8,{html_content}")
+
+def proxies(username, password, endpoint, port):
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Proxies",
+        "permissions": [
+            "proxy",
+            "tabs",
+            "unlimitedStorage",
+            "storage",
+            "<all_urls>",
+            "webRequest",
+            "webRequestBlocking"
+        ],
+        "background": {
+            "scripts": ["background.js"]
+        },
+        "minimum_chrome_version":"22.0.0"
+    }
+    """
+
+    background_js = """
+    var config = {
+            mode: "fixed_servers",
+            rules: {
+              singleProxy: {
+                scheme: "http",
+                host: "%s",
+                port: parseInt(%s)
+              },
+              bypassList: ["localhost"]
+            }
+          };
+
+    chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+
+    function callbackFn(details) {
+        return {
+            authCredentials: {
+                username: "%s",
+                password: "%s"
+            }
+        };
+    }
+
+    chrome.webRequest.onAuthRequired.addListener(
+                callbackFn,
+                {urls: ["<all_urls>"]},
+                ['blocking']
+    );
+    """ % (endpoint, port, username, password)
+
+    # Use the system's temporary directory
+    extension_dir = tempfile.mkdtemp(prefix="drission_proxy_")
+
+    # Ensure the directory exists (tempfile.mkdtemp already creates it)
+    manifest_path = os.path.join(extension_dir, "manifest.json")
+    background_path = os.path.join(extension_dir, "background.js")
+
+    # Write the manifest and background script
+    with open(manifest_path, 'w') as manifest_file:
+        manifest_file.write(manifest_json)
+
+    with open(background_path, 'w') as background_file:
+        background_file.write(background_js)
+
+    return extension_dir
