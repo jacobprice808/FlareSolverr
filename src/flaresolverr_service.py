@@ -251,8 +251,11 @@ def _resolve_challenge(req: V1RequestBase, method: str) -> ChallengeResolutionT:
             co.set_argument('--ignore-certificate-errors')
             co.set_argument('--ignore-ssl-errors')
             co.set_argument('--use-gl=swiftshader')
+            co.set_argument('--remote-debugging-port=9222')
+            co.set_argument('--headless=new')  # Important for headless systems
+            co.set_argument('--user-data-dir=/tmp/user-data')  # Use a unique user data directory
 
-            driver = ChromiumPage(options=co)
+            driver = ChromiumPage(co)
             logging.debug('New instance of ChromiumPage has been created to perform the request')
 
         return func_timeout(timeout, _evil_logic, (req, driver, method))
@@ -297,7 +300,7 @@ def get_correct_window(driver: ChromiumPage) -> ChromiumPage:
     if len(driver.tab_ids) > 1:  # Use tab_ids to check for multiple tabs
         for tab_id in driver.tab_ids:
             driver.switch_to_tab(tab_id)
-            current_url = driver.current_url
+            current_url = driver.url
             if not current_url.startswith("devtools://devtools"):
                 return driver
     return driver
@@ -406,7 +409,7 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
         res.message = "Challenge not detected!"
 
     challenge_res = ChallengeResolutionResultT({})
-    challenge_res.url = driver.current_url
+    challenge_res.url = driver.url
     challenge_res.status = 200  # DrissionPage does not directly provide status codes
     challenge_res.cookies = driver.get_cookies()
     challenge_res.userAgent = utils.get_user_agent(driver)
